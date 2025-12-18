@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "SafeCopy AI Compliance Extension",
+  "version": "1.0",
+  "description": "Real-time AI-powered compliance checks for your marketing content.",
+  "icons": {
+    "16": "/public/icon-dark-32x32.png",
+    "32": "/public/icon-dark-32x32.png",
+    "48": "/public/icon-dark-32x32.png",
+    "128": "/public/icon-dark-32x32.png"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "/public/icon-dark-32x32.png",
+      "32": "/public/icon-dark-32x32.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background.ts"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content.ts"]
+    }
+  ],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}

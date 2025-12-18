@@ -1,5 +1,6 @@
 "use server"
 
+import { createClient } from "@/lib/supabase/server"
 import { generateObject } from "ai"
 import { z } from "zod"
 import type { Flag, Suggestion } from "@/lib/types/database"
@@ -63,9 +64,23 @@ export interface AnalysisResult {
   overallAssessment: string
 }
 
-export async function analyzeScan(content: string, industry = "general"): Promise<AnalysisResult> {
+export async function analyzeScan(content: string, industry = "general", organizationId?: string): Promise<AnalysisResult> {
+  const supabase = await createClient()
+  let customAiInstructions: string | null = null
+  let customRuleSets: string[] = []
+
+  if (organizationId) {
+    const { data: organization, error } = await supabase.from("organizations").select("custom_ai_instructions, custom_rule_sets").eq("id", organizationId).single()
+    if (error) {
+      console.error("Error fetching organization AI settings:", error)
+    } else if (organization) {
+      customAiInstructions = organization.custom_ai_instructions
+      customRuleSets = organization.custom_rule_sets || []
+    }
+  }
+
   // Quick pre-screening with regex patterns
-  const patternFlags = quickPatternScan(content, industry)
+  const patternFlags = quickPatternScan(content, industry, customRuleSets)
 
   // If content is too short, just return pattern-based analysis
   if (content.length < 50) {
@@ -85,15 +100,39 @@ export async function analyzeScan(content: string, industry = "general"): Promis
 
   try {
     // Use AI for deep analysis
-    const industryContext = getIndustryContext(industry)
+    const industryContext = getIndustryContext(industry, customRuleSets)
+
+    let retrievedContext = ""
+    try {
+      const ragResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/rag/retrieve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: content }),
+      })
+
+      if (ragResponse.ok) {
+        const { documents } = await ragResponse.json()
+        if (documents && documents.length > 0) {
+          retrievedContext = "\n\nADDITIONAL LEGAL CONTEXT (from RAG system):\n" +
+                             documents.map((doc: { content: string }) => doc.content).join("\n\n")
+        }
+      } else {
+        console.warn("RAG retrieval API returned non-OK response:", ragResponse.status, await ragResponse.text())
+      }
+    } catch (ragError) {
+      console.error("Error calling RAG retrieval API:", ragError)
+    }
 
     const { object } = await generateObject({
       model: "anthropic/claude-sonnet-4-20250514",
       schema: AnalysisSchema,
       prompt: `You are an expert compliance analyst specializing in ${industry} marketing regulations.
 
-INDUSTRY CONTEXT:
-${industryContext}
+${customAiInstructions ? `CUSTOM INSTRUCTIONS:
+${customAiInstructions}
+
+` : ''}INDUSTRY CONTEXT:
+${industryContext}${retrievedContext}
 
 CONTENT TO ANALYZE:
 """
@@ -157,12 +196,19 @@ For the rewritten content:
   }
 }
 
-function quickPatternScan(content: string, industry: string): Flag[] {
+function quickPatternScan(content: string, industry: string, customRuleSets: string[]): Flag[] {
   const flags: Flag[] = []
   const patterns = [
     ...(COMPLIANCE_PATTERNS[industry as keyof typeof COMPLIANCE_PATTERNS] || []),
     ...COMPLIANCE_PATTERNS.general,
   ]
+
+  // Add patterns from custom rule sets
+  customRuleSets.forEach(ruleSet => {
+    if (COMPLIANCE_PATTERNS[ruleSet as keyof typeof COMPLIANCE_PATTERNS]) {
+      patterns.push(...COMPLIANCE_PATTERNS[ruleSet as keyof typeof COMPLIANCE_PATTERNS])
+    }
+  })
 
   for (const rule of patterns) {
     const matches = content.matchAll(rule.pattern)
@@ -252,7 +298,7 @@ function mergeFlags(patternFlags: Flag[], aiFlags: Flag[]): Flag[] {
   return merged
 }
 
-function getIndustryContext(industry: string): string {
+function getIndustryContext(industry: string, customRuleSets: string[]): string {
   const contexts: Record<string, string> = {
     real_estate: `Real Estate Marketing Regulations:
 - HUD Fair Housing Act: Prohibits discriminatory language and steering
@@ -281,7 +327,34 @@ Key concerns: Cure claims, unsubstantiated efficacy, safety misrepresentation, t
 - CAN-SPAM: Email marketing rules
 - State consumer protection laws
 Key concerns: Superlative claims, false urgency, deceptive pricing, unsubstantiated claims`,
+
+    hipaa: `HIPAA (Health Insurance Portability and Accountability Act) Compliance:
+- Protects patient health information (PHI)
+- Requires patient authorization for use/disclosure of PHI for marketing
+- Avoid direct patient testimonials without explicit consent
+- Ensure marketing materials do not unintentionally disclose PHI`,
+
+    gdpr: `GDPR (General Data Protection Regulation) Compliance:
+- Applies to processing personal data of EU residents
+- Requires clear consent for data collection and marketing
+- Provides data subjects with rights (access, rectification, erasure)
+- Requires transparent privacy policies
+- Key concerns: Consent for marketing, data handling, international data transfers`,
+
+    ccpa: `CCPA (California Consumer Privacy Act) Compliance:
+- Grants California consumers rights regarding their personal information
+- Requires businesses to disclose data collection practices
+- Provides right to opt-out of sale of personal information
+- Similar to GDPR but specific to California residents`,
   }
 
-  return contexts[industry] || contexts.general
+  let contextString = contexts[industry] || contexts.general
+
+  customRuleSets.forEach(ruleSet => {
+    if (contexts[ruleSet]) {
+      contextString += `\n\nADDITIONAL RULE SET: ${ruleSet.toUpperCase()}\n${contexts[ruleSet]}`
+    }
+  })
+
+  return contextString
 }

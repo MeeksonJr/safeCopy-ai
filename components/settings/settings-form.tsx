@@ -10,19 +10,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
-import { User, Building2, Bell, Shield, Loader2, Check, CreditCard } from "lucide-react"
-import type { Profile, Team } from "@/lib/types/database"
+import { User, Building2, Bell, Shield, Loader2, Check, CreditCard, Sparkles, ShieldCheck, Copy } from "lucide-react"
+import type { Profile, Team, Organization } from "@/lib/types/database"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
 import { updateProfile } from "@/app/actions/profile"
+import { updateOrganizationAiSettings } from "@/app/actions/organization"
+import { requestSafeShieldCertification } from "@/app/actions/safeshield"
+import { Textarea } from "../ui/textarea"
 
 interface SettingsFormProps {
   profile: Profile | null
   team: Team | null
+  organization: Organization | null
   userEmail: string
 }
 
-export function SettingsForm({ profile, team, userEmail }: SettingsFormProps) {
+export function SettingsForm({ profile, team, organization, userEmail }: SettingsFormProps) {
   const [fullName, setFullName] = useState(profile?.full_name || "")
   const [companyName, setCompanyName] = useState(profile?.company_name || "")
   const [industry, setIndustry] = useState(profile?.industry || "general")
@@ -30,6 +34,11 @@ export function SettingsForm({ profile, team, userEmail }: SettingsFormProps) {
   const [emailNotifications, setEmailNotifications] = useState(true)
   const [weeklyReport, setWeeklyReport] = useState(true)
   const [highRiskAlerts, setHighRiskAlerts] = useState(true)
+  const [customAiInstructions, setCustomAiInstructions] = useState(organization?.custom_ai_instructions || "")
+  const [selectedRuleSet, setSelectedRuleSet] = useState(organization?.custom_rule_sets?.[0] || "") // Assuming single selection for now
+  const [isSavingAICompliance, setIsSavingAICompliance] = useState(false)
+  const [isRequestingCertification, setIsRequestingCertification] = useState(false)
+  const [copiedBadgeCode, setCopiedBadgeCode] = useState(false)
   const { toast } = useToast()
   const router = useRouter()
 
@@ -61,6 +70,88 @@ export function SettingsForm({ profile, team, userEmail }: SettingsFormProps) {
     }
   }
 
+  const handleSaveAIComplianceSettings = async () => {
+    if (!organization?.id) {
+      toast({
+        title: "Error",
+        description: "Organization not found.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSavingAICompliance(true)
+    try {
+      await updateOrganizationAiSettings({
+        organizationId: organization.id,
+        customAiInstructions: customAiInstructions,
+        customRuleSets: selectedRuleSet ? [selectedRuleSet] : [], // Assuming single selection
+      })
+
+      toast({
+        title: "AI Compliance Settings saved!",
+        description: "Your AI compliance preferences have been updated.",
+      })
+      router.refresh()
+    } catch (error) {
+      console.error("[v0] Error saving AI compliance settings:", error)
+      toast({
+        title: "Error",
+        description: "Failed to save AI compliance settings. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingAICompliance(false)
+    }
+  }
+
+  const handleRequestCertification = async () => {
+    if (!organization?.id) {
+      toast({
+        title: "Error",
+        description: "Organization not found.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsRequestingCertification(true)
+    try {
+      const { error } = await requestSafeShieldCertification({ organizationId: organization.id })
+
+      if (error) {
+        throw new Error(error)
+      }
+
+      toast({
+        title: "Certification Request Submitted!",
+        description: "Your SafeShield certification request has been submitted for review.",
+      })
+      router.refresh() // Re-fetch organization data to reflect changes
+    } catch (error) {
+      console.error("[v0] Error requesting certification:", error)
+      toast({
+        title: "Error",
+        description: "Failed to request certification. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsRequestingCertification(false)
+    }
+  }
+
+  const handleCopyBadgeCode = async () => {
+    if (organization?.safeshield_badge_code) {
+      await navigator.clipboard.writeText(organization.safeshield_badge_code)
+      setCopiedBadgeCode(true)
+      setTimeout(() => setCopiedBadgeCode(false), 2000)
+      toast({
+        title: "Copied!",
+        description: "SafeShield badge code copied to clipboard.",
+      })
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -89,6 +180,19 @@ export function SettingsForm({ profile, team, userEmail }: SettingsFormProps) {
             <Shield className="h-4 w-4" />
             <span className="hidden sm:inline">Security</span>
           </TabsTrigger>
+          {(profile?.role === "admin" || profile?.role === "compliance_officer") && (
+            <TabsTrigger value="ai-compliance" className="gap-2">
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden sm:inline">AI Compliance</span>
+            </TabsTrigger>
+          )}
+
+          {(profile?.role === "admin" || profile?.role === "compliance_officer") && (
+            <TabsTrigger value="safeshield" className="gap-2">
+              <ShieldCheck className="h-4 w-4" />
+              <span className="hidden sm:inline">SafeShield</span>
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Profile Tab */}
@@ -361,6 +465,148 @@ export function SettingsForm({ profile, team, userEmail }: SettingsFormProps) {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {(profile?.role === "admin" || profile?.role === "compliance_officer") && (
+          <TabsContent value="ai-compliance" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-trust-blue" />
+                  AI Compliance Settings
+                </CardTitle>
+                <CardDescription>Configure advanced AI analysis parameters for your team</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="customInstructions">Custom AI Instructions</Label>
+                  <Textarea
+                    id="customInstructions"
+                    placeholder="e.g., 'Ensure all financial claims reference specific disclosures.'"
+                    value={customAiInstructions}
+                    onChange={(e) => setCustomAiInstructions(e.target.value)}
+                    rows={5}
+                    className="resize-y"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Provide additional instructions for the AI when analyzing content.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="ruleSets">Additional Rule Sets</Label>
+                  {/* Placeholder for multi-select dropdown for rule sets */}
+                  <Select value={selectedRuleSet} onValueChange={setSelectedRuleSet}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select additional rule sets" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hipaa">HIPAA (Healthcare)</SelectItem>
+                      <SelectItem value="gdpr">GDPR (Data Privacy)</SelectItem>
+                      <SelectItem value="ccpa">CCPA (California Privacy)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Select specific regulatory frameworks to include in AI analysis.
+                  </p>
+                </div>
+
+                <Separator />
+
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleSaveAIComplianceSettings}
+                    disabled={isSavingAICompliance}
+                    className="gap-2 bg-trust-blue hover:bg-trust-blue/90"
+                  >
+                    {isSavingAICompliance ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4" />
+                        Save AI Settings
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
+        {(profile?.role === "admin" || profile?.role === "compliance_officer") && (
+          <TabsContent value="safeshield" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-trust-blue" />
+                  SafeShield Certification
+                </CardTitle>
+                <CardDescription>Manage your "Verified by SafeCopy" compliance badge</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <p className="font-medium">Certification Status</p>
+                    <Badge className={`mt-1 capitalize ${organization?.safeshield_certified ? "bg-safe-green/10 text-safe-green" : "bg-warning-yellow/10 text-warning-yellow"}`}>
+                      {organization?.safeshield_certified ? "Certified" : "Not Certified"}
+                    </Badge>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Your organization's current SafeShield compliance status.
+                    </p>
+                  </div>
+                  {organization?.safeshield_certified ? (
+                    <Button variant="outline" className="bg-transparent" disabled>View Certificate</Button>
+                  ) : (
+                    <Button
+                      onClick={handleRequestCertification}
+                      disabled={isRequestingCertification}
+                      className="gap-2 bg-trust-blue hover:bg-trust-blue/90"
+                    >
+                      {isRequestingCertification ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Requesting...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="h-4 w-4" />
+                          Request Certification
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+
+                {organization?.safeshield_certified && organization?.safeshield_badge_code && (
+                  <div className="space-y-2">
+                    <Label htmlFor="badgeCode">Embeddable SafeShield Badge Code</Label>
+                    <Textarea
+                      id="badgeCode"
+                      value={organization.safeshield_badge_code}
+                      readOnly
+                      rows={6}
+                      className="font-mono text-sm resize-none bg-muted"
+                    />
+                    <Button
+                      onClick={handleCopyBadgeCode}
+                      size="sm"
+                      className="gap-2 bg-trust-blue hover:bg-trust-blue/90"
+                    >
+                      {copiedBadgeCode ? <Check className="h-4 w-4 text-safe-green" /> : <Copy className="h-4 w-4" />}
+                      {copiedBadgeCode ? "Copied!" : "Copy Code"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Copy and paste this code onto your website to display the SafeShield badge.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

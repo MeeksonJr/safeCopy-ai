@@ -12,6 +12,23 @@ export interface Team {
   scan_limit: number
   monthly_credits: number
   credits_used: number
+  organization_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Organization {
+  id: string
+  name: string
+  subscription_tier: SubscriptionTier
+  risk_tolerance: number
+  paypal_customer_id: string | null
+  paypal_subscription_id: string | null
+  subscription_status: string | null
+  custom_ai_instructions: string | null
+  custom_rule_sets: string[] | null
+  safeshield_certified: boolean
+  safeshield_badge_code: string | null
   created_at: string
   updated_at: string
 }
@@ -24,6 +41,7 @@ export interface Profile {
   industry: string | null
   company_name: string | null
   team_id: string | null
+  org_id: string | null
   created_at: string
   updated_at: string
 }
@@ -43,6 +61,16 @@ export interface Scan {
   status: ScanStatus
   created_at: string
   updated_at: string
+  current_version_id: string | null
+}
+
+export interface ScanVersion {
+  id: string
+  scan_id: string
+  version_number: number
+  original_text: string
+  rewritten_content: string | null
+  created_at: string
 }
 
 export interface Flag {

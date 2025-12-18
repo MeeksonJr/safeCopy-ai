@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Shield, Save, Sparkles, Copy, Check, RefreshCw, FileText, AlertTriangle, CheckCircle, Zap } from "lucide-react"
+import { Shield, Save, Sparkles, Copy, Check, RefreshCw, FileText, AlertTriangle, CheckCircle, Zap, Upload, Loader2 } from "lucide-react"
 import type { Profile } from "@/lib/types/database"
 import { analyzeScan, type AnalysisResult } from "@/app/actions/analyze"
 import { saveScan } from "@/app/actions/save-scan"
+import { processFileForOcr } from "@/app/actions/ocr"
 import { SafetyMeter } from "./safety-meter"
 import { FlagsList } from "./flags-list"
 import Link from "next/link"
@@ -24,15 +25,16 @@ export function ComplianceScanner({ profile }: ComplianceScannerProps) {
   const [content, setContent] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState("original")
+  const [currentScanId, setCurrentScanId] = useState<string | undefined>(undefined)
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
-  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
   const handleAnalyze = useCallback(
-    async (text: string) => {
+    async (text: string, currentScanIdParam?: string) => {
       if (!text.trim() || text.length < 20) {
         setAnalysis(null)
         return
@@ -41,8 +43,34 @@ export function ComplianceScanner({ profile }: ComplianceScannerProps) {
       setIsAnalyzing(true)
 
       try {
-        const result = await analyzeScan(text, profile?.industry || "general")
+        const result = await analyzeScan(text, profile?.industry || "general", profile?.team_id ? profile.org_id || undefined : undefined)
         setAnalysis(result)
+
+        // If a new scan, save it immediately to get an ID
+        if (!currentScanIdParam) {
+          const savedScan = await saveScan(undefined, {
+            originalContent: text,
+            rewrittenContent: result.rewrittenContent,
+            safetyScore: result.safetyScore,
+            riskLevel: result.riskLevel,
+            flaggedIssues: result.flags,
+            suggestions: result.suggestions,
+            industry: profile?.industry || "general",
+          })
+          setCurrentScanId(savedScan.id)
+        } else {
+          // If existing scan, update it
+          await saveScan(currentScanIdParam, {
+            originalContent: text,
+            rewrittenContent: result.rewrittenContent,
+            safetyScore: result.safetyScore,
+            riskLevel: result.riskLevel,
+            flaggedIssues: result.flags,
+            suggestions: result.suggestions,
+            industry: profile?.industry || "general",
+          })
+        }
+
       } catch (error) {
         console.error("[v0] Analysis error:", error)
         toast({
@@ -54,14 +82,8 @@ export function ComplianceScanner({ profile }: ComplianceScannerProps) {
         setIsAnalyzing(false)
       }
     },
-    [profile, toast],
+    [profile, toast, currentScanId],
   )
-
-  const handleManualAnalyze = () => {
-    if (content.length >= 20) {
-      handleAnalyze(content)
-    }
-  }
 
   const handleSave = async () => {
     if (!content.trim() || !analysis) return
@@ -69,15 +91,19 @@ export function ComplianceScanner({ profile }: ComplianceScannerProps) {
     setIsSaving(true)
 
     try {
-      await saveScan({
-        originalContent: content,
-        rewrittenContent: analysis.rewrittenContent,
-        safetyScore: analysis.safetyScore,
-        riskLevel: analysis.riskLevel,
-        flaggedIssues: analysis.flags,
-        suggestions: analysis.suggestions,
-        industry: profile?.industry || "general",
-      })
+      // Since handleAnalyze already saves/updates, this button only saves if not already saved
+      if (!currentScanId) {
+        const savedScan = await saveScan(undefined, {
+          originalContent: content,
+          rewrittenContent: analysis.rewrittenContent,
+          safetyScore: analysis.safetyScore,
+          riskLevel: analysis.riskLevel,
+          flaggedIssues: analysis.flags,
+          suggestions: analysis.suggestions,
+          industry: profile?.industry || "general",
+        })
+        setCurrentScanId(savedScan.id)
+      }
 
       toast({
         title: "Scan saved!",
@@ -124,26 +150,57 @@ export function ComplianceScanner({ profile }: ComplianceScannerProps) {
     setContent(newContent)
   }
 
-  useEffect(() => {
-    if (debounceTimer) {
-      clearTimeout(debounceTimer)
-    }
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-    if (content.length >= 20) {
-      const timer = setTimeout(() => {
-        handleAnalyze(content)
-      }, 1500)
-      setDebounceTimer(timer)
-    } else {
-      setAnalysis(null)
-    }
+    setIsUploading(true);
+    setAnalysis(null); // Clear previous analysis
 
-    return () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer)
-      }
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64String = e.target?.result?.toString().split(',')[1];
+        if (base64String) {
+          const { extractedText, error } = await processFileForOcr({
+            fileBuffer: base64String,
+            fileName: file.name,
+            fileType: file.type,
+          });
+
+          if (error) {
+            toast({
+              title: "OCR Error",
+              description: error,
+              variant: "destructive",
+            });
+          } else if (extractedText) {
+            setContent(extractedText);
+            toast({
+              title: "File Uploaded & Processed",
+              description: "Text extracted successfully from your file.",
+            });
+            // Immediately analyze the new content if it's long enough
+            if (extractedText.length >= 20) {
+              handleAnalyze(extractedText, currentScanId);
+            }
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error("[v0] File upload error:", error);
+      toast({
+        title: "Upload Error",
+        description: "Failed to upload and process file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+      event.target.value = ''; // Clear the file input
     }
-  }, [content])
+  };
+
 
   const getRiskColor = (level: string) => {
     switch (level) {
@@ -192,16 +249,25 @@ export function ComplianceScanner({ profile }: ComplianceScannerProps) {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  onClick={handleManualAnalyze}
-                  disabled={isAnalyzing || content.length < 20}
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 bg-transparent"
+                <input
+                  id="file-upload"
+                  type="file"
+                  className="sr-only"
+                  onChange={handleFileUpload}
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  disabled={isUploading}
+                />
+                <label
+                  htmlFor="file-upload"
+                  className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2 gap-2 cursor-pointer"
                 >
-                  <RefreshCw className={`h-4 w-4 ${isAnalyzing ? "animate-spin" : ""}`} />
-                  <span className="hidden sm:inline">Re-analyze</span>
-                </Button>
+                  {isUploading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  <span className="hidden sm:inline">{isUploading ? "Uploading..." : "Upload File"}</span>
+                </label>
                 {analysis && (
                   <Button
                     onClick={handleSave}
@@ -271,7 +337,14 @@ export function ComplianceScanner({ profile }: ComplianceScannerProps) {
                     <TabsContent value="original" className="mt-0">
                       <Textarea
                         value={content}
-                        onChange={(e) => setContent(e.target.value)}
+                        onChange={(e) => {
+                          setContent(e.target.value);
+                          if (e.target.value.length >= 20) {
+                            handleAnalyze(e.target.value, currentScanId);
+                          } else {
+                            setAnalysis(null);
+                          }
+                        }}
                         placeholder="Paste your email, social media post, ad copy, or any marketing content here...
 
 Example: 'Guaranteed 20% returns! This exclusive investment opportunity won't last. Act now for insider access to our proven wealth-building strategy!'"

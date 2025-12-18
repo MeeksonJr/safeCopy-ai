@@ -18,14 +18,19 @@ export default async function SettingsPage() {
 
   // Get team info if user has a team
   let team = null
+  let organization = null
   if (profile?.team_id) {
     const { data } = await supabase.from("teams").select("*").eq("id", profile.team_id).single()
     team = data
+    if (team?.organization_id) {
+      const { data: orgData } = await supabase.from("organizations").select("*").eq("id", team.organization_id).single()
+      organization = orgData
+    }
   }
 
   return (
     <DashboardShell profile={profile}>
-      <SettingsForm profile={profile} team={team} userEmail={user.email || ""} />
+      <SettingsForm profile={profile} team={team} organization={organization} userEmail={user.email || ""} />
     </DashboardShell>
   )
 }

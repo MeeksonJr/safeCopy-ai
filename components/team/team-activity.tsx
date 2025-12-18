@@ -1,3 +1,4 @@
+"use client"
 import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -131,10 +132,10 @@ export function TeamActivity({
     }
   }
 
-  return (
-    <Card>
+    return (
+      <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle>Audit Log</CardTitle>
+          <CardTitle>Audit Log</CardTitle>
         <Button
           variant="outline"
           size="sm"
@@ -145,8 +146,8 @@ export function TeamActivity({
           {isExporting ? "Exporting..." : "Export to PDF"}
           <Download className="h-4 w-4" />
         </Button>
-      </CardHeader>
-      <CardContent>
+        </CardHeader>
+        <CardContent>
         <div className="mb-4 flex flex-col gap-4 sm:flex-row">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -188,25 +189,25 @@ export function TeamActivity({
             <p className="text-sm text-muted-foreground">No audit logs match your filters</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {logs.map((log) => (
-              <div key={log.id} className="flex items-start gap-3 rounded-lg border border-border p-3">
-                <div className="mt-0.5 rounded-lg bg-trust-blue/10 p-2 text-trust-blue">{getActionIcon(log.action)}</div>
-                <div className="flex-1 space-y-1">
-                  <p className="text-sm font-medium text-foreground">{getActionLabel(log.action)}</p>
+        <div className="space-y-3">
+          {logs.map((log) => (
+            <div key={log.id} className="flex items-start gap-3 rounded-lg border border-border p-3">
+              <div className="mt-0.5 rounded-lg bg-trust-blue/10 p-2 text-trust-blue">{getActionIcon(log.action)}</div>
+              <div className="flex-1 space-y-1">
+                <p className="text-sm font-medium text-foreground">{getActionLabel(log.action)}</p>
                   {log.details && Object.keys(log.details).length > 0 && (
-                    <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                       {Object.entries(log.details)
                         .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-                        .join(", ")}
-                    </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}
+                      .join(", ")}
                   </p>
-                </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}
+                </p>
               </div>
-            ))}
+            </div>
+          ))}
 
             {totalPages > 1 && (
               <Pagination className="mt-4">
@@ -240,7 +241,7 @@ export function TeamActivity({
                 </PaginationContent>
               </Pagination>
             )}
-          </div>
+        </div>
         )}
       </CardContent>
     </Card>

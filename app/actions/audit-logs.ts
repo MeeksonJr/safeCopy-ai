@@ -61,9 +61,9 @@ export async function getAuditLogs({
 
   if (error) {
     console.error("[v0] Error fetching audit logs:", error)
-    throw error
+    return { auditLogs: null, count: null, error }
   }
 
-  return { auditLogs, count }
+  return { auditLogs, count, error: null }
 }
 

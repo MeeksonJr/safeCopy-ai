@@ -6,7 +6,7 @@ SafeCopy AI is evolving from a simple AI wrapper to "The Compliance Operating Sy
 
 ### Key Differentiators:
 *   **Proactive Compliance:** Moves beyond reactive error correction to preventative measures.
-*   **Infrastructure, not just a tool:** Aims to be integrated into daily workflows, not just an occasional visit.
+*   **Infrastructure, not just a tool:** Aims to be integrated into daily workflows, not just an an occasional visit.
 *   **Insurance-as-a-Service:** Provides audit logs as proof of compliance efforts, offering a form of digital insurance against lawsuits.
 *   **Scalability & Adaptability:** Designed to handle evolving legal landscapes through a RAG pipeline and cater to various user personas and organizational sizes.
 
@@ -66,18 +66,21 @@ The project will be rolled out in phases, targeting different market segments.
 *   **AI Logic:**
     *   **Analysis:** Google Gemini 1.5 Pro (Large context for laws).
     *   **Rewriting:** Groq (Llama 3 70b) (Instant speed).
-*   **Payments:** Paddle or LemonSqueezy (for global tax handling).
+*   **Payments:** PayPal (for global tax handling).
 
 ## 6. Database Schema (Supabase)
 
 The database consists of the following tables with RLS enabled:
 
-*   **`organizations`**: `id` (UUID, PK), `name` (Text), `subscription_tier` (Text: 'free', 'pro', 'enterprise'), `risk_tolerance` (Int: 1-10)
+*   **`organizations`**: `id` (UUID, PK), `name` (Text), `subscription_tier` (Text: 'free', 'pro', 'enterprise'), `paypal_customer_id` (Text, UNIQUE), `paypal_subscription_id` (Text, UNIQUE), `subscription_status` (Text)
 *   **`profiles`**: `id` (UUID, PK, refs auth.users), `org_id` (FK), `role` (Enum: 'admin', 'writer', 'compliance_officer'), `full_name` (Text)
-*   **`scans`**: `id` (UUID), `user_id` (FK), `content_hash` (Text), `original_text` (Text, Encrypted), `safety_score` (Int), `flags_found` (JSONB Array), `created_at` (Timestamp)
-*   **`audit_logs`**: `id` (UUID), `org_id` (FK), `actor_id` (FK), `action` (Text: 'SCAN_CREATED', 'WARNING_IGNORED', 'EXPORT_PDF'), `ip_address` (Inet)
-*   **`teams`**: (Implicit from the recent updates, likely linked to organizations and profiles, and now includes `credits_remaining`).
-*   **`templates`**: (Implicit from the recent updates, not explicitly defined in `first-idea.md` but now implemented).
+*   **`scans`**: `id` (UUID), `user_id` (FK), `content_hash` (Text), `original_text` (Text, Encrypted), `safety_score` (Int), `flags_found` (JSONB Array), `suggestions` (JSONB Array), `rewritten_content` (Text), `industry` (Text), `content_type` (Text), `status` (Text), `created_at` (Timestamp), `updated_at` (Timestamp), `current_version_id` (UUID, FK)
+*   **`audit_logs`**: `id` (UUID), `org_id` (FK), `actor_id` (FK), `action` (Text), `details` (JSONB), `ip_address` (Inet), `created_at` (Timestamp)
+*   **`teams`**: `id` (UUID), `name` (Text), `owner_id` (UUID, FK), `plan` (Text), `scan_count` (Integer), `scan_limit` (Integer), `credits_remaining` (Integer), `monthly_credits` (Integer), `credits_used` (Integer), `created_at` (Timestamp), `updated_at` (Timestamp), `organization_id` (UUID, FK)
+*   **`templates`**: `id` (UUID), `team_id` (UUID, FK), `user_id` (UUID, FK), `title` (Text), `content` (Text), `industry` (Text), `category` (Text), `safety_score` (Integer), `is_approved` (Boolean), `created_at` (Timestamp), `updated_at` (Timestamp)
+*   **`scan_versions`**: `id` (UUID), `scan_id` (UUID, FK), `version_number` (Integer), `original_text` (Text), `rewritten_content` (Text), `created_at` (Timestamp)
+*   **`team_invites`**: `id` (UUID), `team_id` (UUID, FK), `email` (Text), `invited_by_user_id` (UUID, FK), `role` (Text), `status` (Text), `created_at` (Timestamp), `updated_at` (Timestamp)
+*   **`legal_documents`**: `id` (UUID), `source_url` (Text), `content` (Text), `embedding` (VECTOR(768)), `created_at` (Timestamp)
 
 ## 7. Functional Requirements (Features)
 
@@ -90,7 +93,7 @@ The database consists of the following tables with RLS enabled:
 
 ### B. The "Scanner" Core
 *   Input: Rich Text Editor (TipTap).
-*   Process: Debounced input -> API `/analyze` (Gemini analyzes against Industry Rules) -> Returns Score (0-100) and Flags (Array of ranges).
+*   Process: Instant input -> API `/analyze` (Gemini analyzes against Industry Rules) -> Returns Score (0-100) and Flags (Array of ranges).
 *   Output:
     *   High-risk phrases highlighted Red.
     *   Medium-risk phrases highlighted Yellow.
@@ -137,23 +140,40 @@ The project has made significant progress, with the following key features and i
 *   **Scan History & Details Pages:** Comprehensive scan history is available with server-side filtering, searching, and pagination. Detailed views of individual scans are provided.
 *   **Reports & Analytics (Audit Logs):**
     *   Server-side fetching, filtering, searching, and pagination of audit logs are implemented.
-    *   **"God Mode" Audit Logs (Enterprise Only):** Functionality for exporting audit logs to PDF (currently an HTML placeholder) is integrated, allowing proof of compliance efforts.
+    *   **"God Mode" Audit Logs (Enterprise Only):** Functionality for exporting audit logs to PDF (now using Puppeteer for actual PDF generation) is integrated, allowing proof of compliance efforts.
 *   **Team Management:**
     *   Team creation is fully functional.
     *   Team member invitation flow is implemented, utilizing a new `team_invites` table.
     *   Role management (admin, writer, compliance_officer) for existing team members is implemented.
     *   The `UserRole` type in `lib/types/database.ts` has been updated to reflect all available roles.
+*   **Subscription Management (PayPal):** Full integration with PayPal for handling subscriptions (created, updated, canceled) and synchronizing with the `organizations` table. Paddle webhook route removed and `paypal_customer_id`, `paypal_subscription_id`, and `subscription_status` columns added to `organizations` table.
+*   **Usage-Based Billing (Credits System):** Backend logic to decrement credits on scan completion and frontend display of credit usage are implemented.
+*   **Enhanced Dashboard Widgets:** New interactive charts for compliance trends over time, content type distribution, and most common flags are implemented and integrated into the dashboard.
+*   **Advanced AI Prompt Engineering:** Implemented a UI in settings for admins/compliance officers to input custom AI instructions and select additional rule sets, which are applied during AI analysis.
+*   **Full RAG Pipeline Integration (The "Legal Brain"):** The full RAG system, including scraping, data processing, vector database integration, and API for real-time retrieval by Gemini, is now integrated. `analyzeScan` leverages RAG for dynamic compliance knowledge.
+*   **"SafeShield" Certification UI:** The UI for displaying and managing the "Verified by SafeCopy" badge for agents, including embeddable code snippets, and backend logic for verifying certification status, is implemented.
+*   **Real-time Feedback in Editor (Beyond Debounce):** The editor now provides instant compliance feedback as users type, removing the previous debounce delay.
+*   **Version History for Scans:** Database schema updated with `scan_versions` table and `current_version_id` in `scans` table. `saveScan` action modified to manage versions. A new server action (`app/actions/scan-versions.ts`) has been created to fetch all versions associated with a given `scan_id`. The UI for viewing and restoring versions has been developed, including fetching scan versions and providing an interface to apply previous versions to the current editor content.
+*   **Chrome Extension & API:** The basic Chrome extension structure (`extension/manifest.json`, `extension/src/background.ts`, `extension/src/content.ts`, `extension/src/popup.html`, `extension/src/popup.js`) is in place. The extension now dynamically injects an "Analyze with SafeCopy AI" button when text is selected, sends the selected text to a new API endpoint (`app/api/extension/analyze/route.ts`) for analysis, and displays the results (safety score, risk level, flagged issues) directly on the page.
+*   **Direct File Uploads (OCR Enhancement):** File upload input and a dedicated button have been integrated into the `ComplianceScanner` component. A new server action (`app/actions/ocr.ts`) has been created to handle file uploads and perform OCR. The `rag_pipeline/requirements.txt` file has been updated to include `pytesseract` and `Pillow`, and a new Python script `rag_pipeline/ocr_processor.py` has been created to handle OCR processing. The `handleFileUpload` function in `ComplianceScanner` now reads the selected file, converts it to Base64, and sends it to the OCR action, which executes the Python script and populates the scanner's content with the extracted text.
 
 ### Database Schema Updates:
 *   `credits_remaining` has been correctly moved to the `teams` table.
 *   A new `team_invites` table has been created to manage pending team invitations.
+*   PayPal-related columns (`paypal_customer_id`, `paypal_subscription_id`, `subscription_status`) have been added to the `organizations` table, replacing Paddle-specific columns.
+*   AI compliance settings columns (`custom_ai_instructions`, `custom_rule_sets`) have been added to the `organizations` table.
+*   `organization_id` has been added to the `teams` table.
+*   `safeshield_certified` and `safeshield_badge_code` columns have been added to the `organizations` table.
+*   A `legal_documents` table with a `vector` column has been created, and the `vector` extension enabled for RAG.
+*   A new `scan_versions` table has been created to store historical versions of scanned content and its rewritten suggestions.
+*   The `scans` table now includes a `current_version_id` column, referencing the latest version in the `scan_versions` table.
 
-### Remaining Tasks from Initial Plan (Completed):
-*   Review the `Templates` system to ensure full CRUD operations and intuitive UI/UX. (Completed)
-*   Review `Scans History & Details` to confirm filtering, searching, and detailed view functionalities. (Completed)
-*   Review `Reports & Analytics` to validate interactive charts and audit logs functionality. (Completed)
-*   Team page needs member invites and role management. (Completed)
-*   Audit logs viewer needs full implementation (now integrated into `TeamActivity` with enhanced features). (Completed)
+### Remaining Tasks from Initial Plan (All Completed):
+*   All tasks from Phase 1, Phase 2, Phase 4.1, and Phase 4.2 of the previous plan are now completed.
+*   The SQL migration for `team_invites` table creation (`scripts/008_create_team_invites_table.sql`) is completed.
+*   The SQL migration for `scan_versions` table creation (`scripts/015_create_scan_versions_table.sql`) is completed.
+*   The SQL migration for adding `current_version_id` to `scans` table (`scripts/016_add_current_version_id_to_scans.sql`) is completed.
+*   The SQL migration for migrating from Paddle to PayPal (`scripts/017_migrate_from_paddle_to_paypal.sql`) is completed.
 
 ---
 
@@ -168,20 +188,17 @@ This section outlines potential future features, UI/UX improvements, and busines
     *   **Impact:** AI-driven compliance that dynamically updates, offering a significant competitive advantage.
     *   **Technical:** Requires robust scraping, data processing (embedding generation), vector database integration, and API for real-time retrieval by Gemini.
 
-2.  **Advanced AI Prompt Engineering:**
-    *   **Description:** Allow enterprise clients to customize rule sets and prompt instructions for AI analysis, tailored to their specific internal policies or niche compliance needs.
-    *   **Impact:** Higher flexibility and customization for large organizations.
-
-3.  **Real-time Feedback in Editor (Beyond Debounce):**
+2.  **Real-time Feedback in Editor (Beyond Debounce):**
     *   **Description:** Integrate AI analysis directly into the rich text editor for instant feedback as the user types, rather than a 1-second debounce.
     *   **Impact:** Smoother, more intuitive user experience; immediate correction.
     *   **Technical:** Requires highly optimized, low-latency AI inference (e.g., local models or extremely fast cloud endpoints).
 
-4.  **Version History for Scans:**
+3.  **Version History for Scans:**
     *   **Description:** Allow users to view and revert to previous versions of scanned content and its rewritten suggestions.
     *   **Impact:** Enhanced auditability, content recovery, and compliance tracking over time.
+    *   **Technical:** Database schema updated with `scan_versions` table and `current_version_id` in `scans` table. `saveScan` action modified to manage versions. A new server action (`app/actions/scan-versions.ts`) has been created to fetch all versions associated with a given `scan_id`. The UI for viewing and restoring versions has been developed, including fetching scan versions and providing an interface to apply previous versions to the current editor content.
 
-5.  **Multi-language Support:**
+4.  **Multi-language Support:**
     *   **Description:** Extend the scanner and templates to support multiple languages for global operations.
     *   **Impact:** Expands market reach.
 
@@ -191,105 +208,62 @@ This section outlines potential future features, UI/UX improvements, and busines
     *   **Description:** Develop the UI for displaying and managing the "Verified by SafeCopy" badge for agents, including embeddable code snippets.
     *   **Impact:** Viral marketing and trust-building for real estate agents.
 
-2.  **Chrome Extension & API (Phase 2):**
+2.  **Chrome Extension & API (Phase 2 from original roadmap):**
     *   **Description:** Implement the "Ghost" button that appears in third-party applications (Gmail, LinkedIn, CRM) for seamless scanning and rewriting.
+    *   **Status:** Completed.
     *   **Impact:** Deep integration into user workflows, increased stickiness.
+    *   **Technical:** Robust content script interaction, messaging between content scripts and background script, and a dedicated API endpoint for analysis. The "Ghost" button is now dynamic, appearing on text selection, and directly sends content to the SafeCopy AI backend for analysis and rewriting without opening a new tab, with results displayed directly on the page.
 
-3.  **Enhanced Dashboard Widgets:**
-    *   **Description:** Add more interactive charts and data visualizations to the dashboard, e.g., compliance trends over time, breakdown by content type, most common flags.
-    *   **Impact:** Deeper insights for brokers and compliance officers.
-
-4.  **Mobile Keyboard Extension (Phase 3):**
+3.  **Mobile Keyboard Extension (Phase 3):**
     *   **Description:** Develop the iOS/Android keyboard extension that provides real-time compliance feedback during mobile communication.
     *   **Impact:** Captures critical mobile communication, preventative compliance.
 
-5.  **Direct File Uploads (OCR Enhancement):**
+4.  **Direct File Uploads (OCR Enhancement):**
     *   **Description:** Improve the robustness and accuracy of PDF/image text extraction using Gemini Vision API or fine-tuned `tesseract.js` configurations.
+    *   **Status:** Completed. File upload input and a dedicated button have been integrated into the `ComplianceScanner` component. A new server action (`app/actions/ocr.ts`) has been created to handle file uploads and perform OCR. The `rag_pipeline/requirements.txt` file has been updated to include `pytesseract` and `Pillow`, and a new Python script `rag_pipeline/ocr_processor.py` has been created to handle OCR processing. The `handleFileUpload` function in `ComplianceScanner` now reads the selected file, converts it to Base64, and sends it to the OCR action, which executes the Python script and populates the scanner's content with the extracted text.
     *   **Impact:** Broader applicability for various content types.
+    *   **Technical:** The OCR implementation is complete. The Python script `rag_pipeline/ocr_processor.py` is now integrated via Node.js's `child_process` in `app/actions/ocr.ts`. Further enhancements would focus on refining the OCR accuracy and potentially integrating advanced OCR services.
 
-6.  **Advanced User Permissions/Roles:**
+5.  **Advanced User Permissions/Roles:**
     *   **Description:** Granular control over permissions within a team, beyond just basic roles (e.g., restrict certain users from editing templates, or only allow certain roles to export audit logs).
     *   **Impact:** Enterprise-grade security and control.
 
 ### C. Business Model & Management Features
 
-1.  **Subscription Management with Paddle/LemonSqueezy:**
-    *   **Description:** Full integration with a chosen payment provider for handling subscriptions, upgrades, downgrades, billing, and invoicing.
-    *   **Impact:** Monetization and automated billing.
-    *   **Technical:** Requires webhook handling, secure client-side payment flows, and synchronization with Supabase `organizations` table (`subscription_tier`, `credits_remaining`, etc.).
-
-2.  **Usage-Based Billing (Credits):**
-    *   **Description:** Implement a robust system for tracking and billing based on AI scan credits. Integrate with payment provider for automated top-ups or overage charges.
-    *   **Impact:** Flexible pricing model, incentivizes efficient usage.
-
-3.  **Single Sign-On (SSO) (Enterprise Only):**
+1.  **Single Sign-On (SSO) (Enterprise Only):**
     *   **Description:** Allow enterprise clients to integrate with their existing identity providers (e.g., Okta, Azure AD).
     *   **Impact:** Critical for enterprise adoption, streamlines user management.
+    *   **Architectural and Implementation Plan:**
+        1.  **Architectural Overview:** The integration will leverage Supabase's built-in support for enterprise Single Sign-On (SSO) using the OpenID Connect (OIDC) or SAML 2.0 protocols. The general flow will be: 1. User attempts to log in to SafeCopy AI. 2. User is redirected to their organization's Identity Provider (IdP) (Okta or Azure AD). 3. User authenticates with the IdP. 4. IdP redirects the user back to Supabase (via a callback URL), providing an authentication assertion. 5. Supabase processes the assertion, creates/updates the user in `auth.users`, and issues a session token. 6. Supabase redirects the user back to the SafeCopy AI application with the session token.
+        2.  **Supabase Configuration (Admin Panel):** The primary configuration for SSO will happen within the Supabase project dashboard, typically under "Authentication" -> "Settings" or "Providers." This involves choosing the provider (OpenID Connect or SAML 2.0), providing client/app IDs, secrets, issuer/metadata URLs, and configuring callback URLs (redirect URIs) in both Supabase and the IdP. Attribute mapping from the IdP to Supabase user metadata is crucial.
+        3.  **Application Changes (Frontend):** Adapt the login flow in `app/auth/login/page.tsx` by adding specific "Sign in with Okta/Azure AD" buttons. These buttons will initiate SSO by calling `supabase.auth.signInWithSSO` (or equivalent method) to redirect the user to the IdP. The existing `app/auth/callback/route.ts` should handle the post-IdP redirect and session exchange.
+        4.  **Application Changes (Backend - Optional, for Advanced Scenarios):** For automatic user provisioning or advanced profile synchronization, configure webhooks in Okta/Azure AD to notify the SafeCopy AI backend about user lifecycle events. Role mapping from IdP roles to Supabase user metadata can be used for granular permissions.
+        5.  **Environment Variables:** No new environment variables are strictly needed on the Next.js side for basic SSO integration, as the configuration is primarily handled within the Supabase dashboard. However, if using the `signInWithSSO` method and requiring a `provider` ID, this could be stored in `.env.local`.
+        6.  **Development Steps:** 1. Configure Supabase for SSO in the project dashboard. 2. Update `app/auth/login/page.tsx` with SSO buttons and logic. 3. Thoroughly test the SSO flow.
 
-4.  **Admin Panel for Superusers:**
+2.  **Admin Panel for Superusers:**
     *   **Description:** A dedicated internal tool for SafeCopy administrators to manage users, teams, subscriptions, and monitor system health.
     *   **Impact:** Operational efficiency and support.
+    *   **Architectural and Key Features Plan:**
+        1.  **Purpose and Scope:** The Admin Panel will be an internal tool for managing platform operations, monitoring system health, and supporting users/organizations. It will enable administrators to oversee user accounts, manage organizations/teams, monitor subscriptions/usage, access audit logs, and manage system configurations.
+        2.  **User Roles (within the Admin Panel):** Different levels of administrative access will exist, such as Super Administrator (full access), Support Agent (limited user/organization data access), and Billing Administrator (subscription/usage data access).
+        3.  **Key Modules and Features:** This includes a Dashboard Overview (system health, key statistics), User Management (list, details, edit, reset password, impersonate, deactivate/delete), Organization & Team Management (list, details, edit organization settings, manage team memberships/credits, approve/revoke SafeShield), Subscription & Billing (overview, payment history, usage reports, actions like adjusting plans/credits/refunds), Enhanced Audit Logs (centralized view, advanced filtering, search, export), and System Configuration (global rule sets, template categories/industries, RAG pipeline monitoring).
+        4.  **Technology Considerations:** Frontend will reuse Next.js, TailwindCSS, ShadCN UI. Backend will extend Next.js Server Actions, utilize Supabase Admin Client, and integrate with PayPal APIs and monitoring tools. Supabase PostgreSQL will be the database. Authentication will be dedicated for admins with strict session management.
+        5.  **Security and Access Control:** Implement strong authentication (MFA), granular authorization based on admin roles, meticulous audit logging for all admin actions, rate limiting, and IP whitelisting. Prioritize safe server actions and limit direct database modifications.
+        6.  **Integration Points:** Supabase API for user/organization/team/auth management, PayPal API for billing, and logging/monitoring services for system health.
 
 ### D. Security & Infrastructure
 
-1.  **Full PDF Generation Integration:**
-    *   **Description:** Replace the HTML placeholder in `exportAuditLogsToPdf` with actual PDF generation using `puppeteer` or `pdf-lib` to produce fully compliant, styled PDF reports.
-    *   **Impact:** Professional, verifiable compliance reports.
-
-2.  **Enhanced Data Encryption:**
+1.  **Enhanced Data Encryption:**
     *   **Description:** Implement more stringent encryption for `original_text` and `rewritten_content` in the `scans` table, possibly using Supabase's encryption capabilities or a separate encryption service.
     *   **Impact:** Higher security and data privacy.
-
----
-
-## 12. Proposed Implementation Plan: Phase 4 (Next Steps)
-
-Given the completion of Phase 1 and 2, the next logical steps involve moving forward with key strategic enhancements and monetization features.
-
-### Phase 4.1: Monetization & Core Integrations (High Priority)
-
-1.  **Implement Full PDF Generation for Audit Logs:**
-    *   **Goal:** Replace the HTML placeholder with a robust PDF generation solution.
-    *   **Action:** Integrate `puppeteer` (or a suitable alternative) on the backend to convert the generated HTML audit log into a downloadable PDF. Update frontend to handle PDF blob.
-    *   **Dependencies:** Backend setup for PDF generation.
-
-2.  **Integrate Subscription Management with Paddle/LemonSqueezy:**
-    *   **Goal:** Enable users to subscribe to different plans and manage their subscriptions.
-    *   **Actions:**
-        *   Backend: Set up webhooks to handle subscription events (creation, renewal, cancellation, upgrades).
-        *   Frontend: Develop UI for pricing plans, subscription checkout, and a user-friendly subscription management page within "Settings."
-    *   **Dependencies:** Chosen payment provider account setup.
-
-3.  **Implement Usage-Based Billing (Credits System):**
-    *   **Goal:** Track and manage AI scan credits, integrating with the subscription model.
-    *   **Actions:**
-        *   Backend: Logic to decrement credits on scan completion, handle credit top-ups, and enforce limits based on subscription tier.
-        *   Frontend: Display real-time credit usage and options to purchase more credits.
-    *   **Dependencies:** Subscription management in place.
-
-### Phase 4.2: Workflow & UI/UX Enhancements (Medium Priority)
-
-1.  **Enhanced Dashboard Widgets:**
-    *   **Goal:** Provide richer insights and data visualizations on the dashboard.
-    *   **Actions:** Implement new interactive charts for compliance trends over time, breakdown by content type, and most common flags.
-    *   **Dependencies:** Sufficient scan data for meaningful visualization.
-
-2.  **Advanced AI Prompt Engineering (Initial Version):**
-    *   **Goal:** Offer basic customization of AI rules for enterprise users.
-    *   **Actions:** Develop a simple UI in "Settings" where admins can input custom instructions or select additional rule sets to apply during scanning.
-    *   **Dependencies:** Backend API to store and apply custom rules.
-
-### Phase 4.3: Strategic Expansion (Lower Priority / Future)
-
-1.  **Full RAG Pipeline Integration (The "Legal Brain"):**
-    *   **Goal:** Achieve dynamic, self-updating legal compliance knowledge.
-    *   **Actions:** Implement the scraping script, data processing, and vector database integration. Update `analyzeScan` to leverage RAG.
-    *   **Dependencies:** Dedicated infrastructure/services for data ingestion and vector search.
-
-2.  **"SafeShield" Certification UI:**
-    *   **Goal:** Enable agents to display their compliance badge.
-    *   **Actions:** Design and implement the badge display and embed code generation in the frontend.
-
-3.  **Chrome Extension & Mobile Keyboard:**
-    *   **Goal:** Integrate SafeCopy AI directly into user workflows across platforms.
-    *   **Actions:** These are separate development tracks requiring dedicated efforts for browser extension and mobile app development, respectively.
+    *   **Architectural and Implementation Plan (pgcrypto):**
+        1.  **Recommendation:** Implement PostgreSQL `pgcrypto` symmetric encryption for `original_text` and `rewritten_content` columns in the `scans` table. This provides an additional layer of data-at-rest encryption while allowing the backend (Next.js Server Actions) to encrypt/decrypt the content for AI analysis and other functionalities.
+        2.  **Implementation Steps:**
+            *   **Enable `pgcrypto` Extension:** Add `CREATE EXTENSION IF NOT EXISTS pgcrypto;` to a new SQL migration file (e.g., `scripts/018_enable_pgcrypto_extension.sql`).
+            *   **Update `scans` Table Schema:** Create another SQL migration file (e.g., `scripts/019_encrypt_scan_content.sql`) to alter `original_text` and `rewritten_content` columns from `TEXT` to `BYTEA`. This will require careful data migration if existing data is present.
+            *   **Secure Key Management:** Add a new environment variable `SCAN_ENCRYPTION_KEY` to `.env.local` (e.g., `SCAN_ENCRYPTION_KEY=your_strong_random_key`). This key must be strong and kept secret.
+            *   **Modify `save-scan.ts` (Encryption):** In `app/actions/save-scan.ts`, encrypt content using `pgp_sym_encrypt(content, process.env.SCAN_ENCRYPTION_KEY)` before insertion/update.
+            *   **Modify `getScans` (Decryption):** In `app/actions/scans.ts` (and other retrieval actions), decrypt content using `pgp_sym_decrypt(encrypted_content, process.env.SCAN_ENCRYPTION_KEY)` after fetching.
+            *   **Update `lib/types/database.ts`:** If necessary, update the `Scan` interface to reflect the `BYTEA` type for encrypted content, though string conversion will happen in actions.
+            *   **Review AI Analysis:** Ensure `app/actions/analyze.ts` receives plaintext content by decrypting it when fetching for analysis.

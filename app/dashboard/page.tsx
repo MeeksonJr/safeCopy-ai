@@ -4,6 +4,10 @@ import { DashboardShell } from "@/components/dashboard/dashboard-shell"
 import { StatsOverview } from "@/components/dashboard/stats-overview"
 import { RecentScans } from "@/components/dashboard/recent-scans"
 import { RiskTrends } from "@/components/dashboard/risk-trends"
+import { ComplianceTrendsChart } from "@/components/dashboard/compliance-trends-chart"
+import { ContentTypeDistributionChart } from "@/components/dashboard/content-type-distribution-chart"
+import { MostCommonFlagsChart } from "@/components/dashboard/most-common-flags-chart"
+import { getComplianceTrends, getContentTypeDistribution, getMostCommonFlags } from "@/app/actions/dashboard"
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -58,6 +62,10 @@ export default async function DashboardPage() {
 
   const creditsRemaining = team ? (team.monthly_credits || 50) - (team.credits_used || 0) : 0
 
+  const complianceTrends = await getComplianceTrends(user.id, profile?.team_id || null)
+  const contentTypeDistribution = await getContentTypeDistribution(user.id, profile?.team_id || null)
+  const mostCommonFlags = await getMostCommonFlags(user.id, profile?.team_id || null)
+
   return (
     <DashboardShell profile={profile}>
       <div className="space-y-8">
@@ -76,11 +84,17 @@ export default async function DashboardPage() {
         />
 
         <div className="grid gap-6 lg:grid-cols-7">
+          <ComplianceTrendsChart data={complianceTrends} />
+          <ContentTypeDistributionChart data={contentTypeDistribution} />
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-7">
           <div className="lg:col-span-4">
             <RecentScans scans={recentScans || []} />
           </div>
           <div className="lg:col-span-3">
             <RiskTrends scans={recentScans || []} />
+            <MostCommonFlagsChart data={mostCommonFlags} />
           </div>
         </div>
       </div>

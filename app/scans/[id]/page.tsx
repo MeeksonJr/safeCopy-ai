@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { DashboardShell } from "@/components/dashboard/dashboard-shell"
 import { ScanDetails } from "@/components/scans/scan-details"
+import { getScanVersions } from "@/app/actions/scan-versions"
 
 export default async function ScanDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -23,9 +24,11 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
     notFound()
   }
 
+  const scanVersions = await getScanVersions(scan.id)
+
   return (
     <DashboardShell profile={profile}>
-      <ScanDetails scan={scan} />
+      <ScanDetails scan={scan} scanVersions={scanVersions} />
     </DashboardShell>
   )
 }
